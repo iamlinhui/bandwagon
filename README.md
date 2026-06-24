@@ -91,7 +91,7 @@ GOOS=linux GOARCH=amd64 go build -o bandwagon .
 | `POST` | `/api/logout` | 登出                               |
 | `GET`  | `/api/instances` | 全部机器快照                           |
 | `GET`  | `/api/instances/{id}` | 单台机器详情                           |
-| `POST` | `/api/instances/{id}/action` | `{action: start\|stop\|restart}` |
+| `POST` | `/api/instances/{id}/action` | `{action: start / stop / restart}` |
 
 ## 说明与限制
 
