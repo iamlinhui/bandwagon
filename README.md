@@ -84,14 +84,14 @@ GOOS=linux GOARCH=amd64 go build -o bandwagon .
 
 看板前端调用的 JSON 接口(密码启用时需登录态 cookie 或 `Authorization: Bearer <session>`):
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET`  | `/api/auth/status` | 鉴权状态(无需登录) |
-| `POST` | `/api/login` | `{password}` 登录 |
-| `POST` | `/api/logout` | 登出 |
-| `GET`  | `/api/instances` | 全部机器快照 |
-| `GET`  | `/api/instances/{id}` | 单台机器详情 |
-| `POST` | `/api/instances/{id}/action` | `{action: start|stop|restart}` |
+| 方法 | 路径 | 说明                               |
+| --- | --- |----------------------------------|
+| `GET`  | `/api/auth/status` | 鉴权状态(无需登录)                       |
+| `POST` | `/api/login` | `{password}` 登录                  |
+| `POST` | `/api/logout` | 登出                               |
+| `GET`  | `/api/instances` | 全部机器快照                           |
+| `GET`  | `/api/instances/{id}` | 单台机器详情                           |
+| `POST` | `/api/instances/{id}/action` | `{action: start\|stop\|restart}` |
 
 ## 说明与限制
 
