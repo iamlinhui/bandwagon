@@ -1,0 +1,43 @@
+# /etc/systemd/system/bandwagon.service
+# BandwagonHost (搬瓦工) VPS dashboard — single-binary web UI.
+# Listens on the address set by "listen" in config.json (default :8080).
+
+[Unit]
+Description=BandwagonHost VPS Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+WorkingDirectory=/opt/bandwagon
+ExecStart=/opt/bandwagon/bandwagon -config /opt/bandwagon/config.json
+
+# Restart on crash; back off so a bad config won't hammer the journal.
+Restart=on-failure
+RestartSec=5s
+
+# Logs go to journald:  journalctl -u bandwagon -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bandwagon
+
+# Plenty of outbound sockets (the store polls KiwiVM for every instance).
+LimitNOFILE=65536
+
+# --- Hardening that works on systemd 219+ (e.g. CentOS 7) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+# --- Extra hardening (systemd >= 232). On older systemd these are ignored
+#     with a harmless "Unknown lvalue" warning, so they're safe to leave here. ---
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
