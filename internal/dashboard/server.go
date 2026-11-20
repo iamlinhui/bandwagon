@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,16 +18,26 @@ import (
 
 // Server wires the data store, optional auth and HTTP routes together.
 type Server struct {
-	store *Store
-	auth  *authState
-	mux   *http.ServeMux
+	store   *Store
+	auth    *authState
+	shell   ShellConfig
+	origins []string
+	gate    *shellGate
+	sshGate *sshGate
+	mux     *http.ServeMux
 }
 
-// NewServer builds a Server. password == "" disables auth entirely.
-func NewServer(store *Store, password string) *Server {
+// NewServer builds a Server from the loaded config. An empty Password disables
+// auth entirely; Shell controls the Basic Shell, while the SSH terminal is
+// enabled per instance by the presence of credentials.
+func NewServer(store *Store, cfg *Config) *Server {
 	s := &Server{
-		store: store,
-		auth:  newAuth(password),
+		store:   store,
+		auth:    newAuth(cfg.Password),
+		shell:   cfg.Shell,
+		origins: cfg.AllowedOrigins,
+		gate:    newShellGate(),
+		sshGate: newSSHGate(),
 	}
 	s.routes()
 	return s
@@ -38,6 +49,11 @@ func (s *Server) routes() {
 	// Static page (the login gate is rendered client-side; the page itself is
 	// always served so users aren't locked out by a 401 on document load).
 	mux.HandleFunc("GET /{$}", s.handleIndex)
+	// Vendored front-end libraries (xterm.js and addons), served straight out of
+	// the binary so a deployment never depends on a CDN. Cached briefly: the file
+	// only changes when the binary does.
+	mux.Handle("GET /vendor/", cacheFor(time.Hour,
+		http.StripPrefix("/vendor/", http.FileServerFS(web.Vendor))))
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
@@ -45,6 +61,11 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/instances", s.requireAuth(s.handleList))
 	mux.HandleFunc("GET /api/instances/{id}", s.requireAuth(s.handleOne))
 	mux.HandleFunc("POST /api/instances/{id}/action", s.requireAuth(s.handleAction))
+	mux.HandleFunc("POST /api/instances/{id}/shell", s.requireAuth(s.handleShell))
+	// Real SSH terminal over WebSocket. Always registered: when an instance has
+	// no credentials the handler explains that *inside* the socket, which is the
+	// only channel a WebSocket client can actually read.
+	mux.HandleFunc("GET /api/instances/{id}/ssh", s.requireAuth(s.handleSSH))
 
 	s.mux = mux
 }
@@ -58,7 +79,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("dashboard listening on %s (auth=%t)", addr, s.auth.enabled)
+		log.Printf("dashboard listening on %s (auth=%t shell=%t)", addr, s.auth.enabled, s.shell.Enabled)
 		errCh <- srv.ListenAndServe()
 	}()
 	select {
@@ -80,10 +101,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	snap := s.store.Snapshot()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":      s.auth.enabled,
-		"title":        snap.Title,
-		"authed":       s.auth.checkRequest(r),
-		"poll_seconds": snap.PollSeconds,
+		"enabled":       s.auth.enabled,
+		"title":         snap.Title,
+		"authed":        s.auth.checkRequest(r),
+		"poll_seconds":  snap.PollSeconds,
+		"shell_enabled": s.shell.Enabled,
 	})
 }
 
@@ -174,6 +196,14 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 	}
+}
+
+// cacheFor adds a Cache-Control header to static asset responses.
+func cacheFor(d time.Duration, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(int(d.Seconds())))
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

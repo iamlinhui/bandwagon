@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VPS看板</title>
+<!-- 终端库:随二进制内嵌,同源加载,不依赖 CDN -->
+<link rel="stylesheet" href="/vendor/xterm.css">
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/xterm-addon-fit.js"></script>
+<script src="/vendor/xterm-addon-web-links.js"></script>
 <style>
   :root {
     --bg: #f5f7fa;
@@ -141,6 +146,11 @@
     display: none; align-items: center; justify-content: center; padding: 20px;
   }
   .overlay.show { display: flex; }
+  /* Derive the page lock from all visible overlays: closing SSH must not
+     unlock the dashboard while the instance details are still open. */
+  html { scrollbar-gutter: stable; }
+  html:has(.overlay.show), body:has(.overlay.show) { overflow: hidden; }
+  .overlay, .modal, .modal-body, .term { overscroll-behavior: contain; }
   .modal {
     background: var(--bg-2); border: 1px solid var(--border); border-radius: 16px;
     width: 100%; max-width: 560px; max-height: 88vh; overflow: auto; box-shadow: var(--shadow);
@@ -150,6 +160,80 @@
   .modal-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
   .modal-foot { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
   .close-x { margin-left: auto; background: none; border: none; color: var(--text-mute); font-size: 22px; cursor: pointer; line-height: 1; }
+
+  /* ---------- Web shell ---------- */
+  #shOverlay { z-index: 55; }
+  .modal.wide { max-width: 940px; }
+  .term {
+    background: #0d1117; border: 1px solid #20262e; border-radius: 10px 10px 0 0;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12.5px; line-height: 1.55; color: #d6deeb;
+    height: 50vh; min-height: 240px; overflow-y: auto; padding: 12px 14px;
+  }
+  .term-line { white-space: pre-wrap; word-break: break-word; }
+  .term .cmd { color: #7ee787; }
+  .term .err { color: #ff7b72; }
+  .term .warn { color: #d29922; }
+  .term .dim { color: #6e7781; }
+  .term-row {
+    display: flex; align-items: center; gap: 8px;
+    background: #0d1117; border: 1px solid #20262e; border-top: none; border-radius: 0 0 10px 10px;
+    padding: 9px 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .term-prompt { color: #7ee787; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46%; }
+  .term-input {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+    color: #e6edf3; font: inherit; font-size: 12.5px; caret-color: #7ee787;
+  }
+  .term-input:disabled { opacity: .55; }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; }
+  .quick button {
+    background: var(--card); border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 8px; padding: 4px 9px; font-size: 11.5px; cursor: pointer;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .quick button:hover { border-color: var(--accent); color: var(--text); }
+  .hint { font-size: 11.5px; color: var(--text-mute); line-height: 1.6; }
+
+  /* ---------- SSH terminal (xterm.js) ---------- */
+  #sshOverlay { z-index: 56; }
+  /* 弹窗整体是 flex 列:头/脚固定,终端吃掉剩余高度。这样任何窗口尺寸下都不会
+     出现"内容比弹窗高被裁掉"或"终端最后一行被切"。 */
+  .modal.terminal {
+    max-width: 1180px;
+    /* 定高 + flex:头/脚固定,终端吃掉全部剩余空间。只用 max-height 的话弹窗高度
+       由内容决定,大屏上终端不会变大。 */
+    height: 92vh; max-height: 92vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal.terminal > .modal-head, .modal.terminal > .modal-foot { flex: none; }
+  .modal.terminal > .modal-body {
+    flex: 1 1 auto; min-height: 0; overflow: auto;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .xterm-host {
+    /* 高度由 flex 决定,不由内容决定;overflow:hidden 保证圆角内干净 */
+    flex: 1 1 auto; min-height: 180px;
+    background: #0d1117; border-radius: 10px; overflow: hidden;
+    /* 关键:FitAddon 只从「直接父元素的高度」里扣 .xterm 自己的 padding,不会扣
+       父元素的 padding/border。所以这里不能留 padding 和 border,否则它会多算出
+       几行、最后一行被切掉。内边距放到 .xterm 上,边框用 inset 阴影画(不占布局)。 */
+    box-shadow: inset 0 0 0 1px #20262e;
+  }
+  .xterm-host .xterm { padding: 8px 10px; }
+  .xterm-host, .xterm-host .xterm-viewport { overscroll-behavior: none; }
+  .ssh-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-mute); }
+  .ssh-bar .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--text-dim); background: var(--card-2); border: 1px solid var(--border);
+    padding: 3px 8px; border-radius: 7px;
+  }
+  .ssh-bar .spacer { flex: 1; }
+  .ssh-state { font-weight: 600; }
+  .ssh-state.ok { color: var(--ok); }
+  .ssh-state.bad { color: var(--bad); }
+  .ssh-state.wait { color: var(--warn); }
 
   /* ---------- Login ---------- */
   .login-wrap { position: fixed; inset: 0; display: grid; place-items: center; z-index: 60; background: var(--bg); }
@@ -234,12 +318,84 @@
   </div>
 </div>
 
+<!-- Web shell modal -->
+<div class="overlay" id="shOverlay">
+  <div class="modal wide">
+    <div class="modal-head">
+      <span id="shStatus"></span>
+      <div>
+        <div class="ttl" id="shTitle">Shell</div>
+        <div style="font-size:12px;color:var(--text-mute)" id="shSub"></div>
+      </div>
+      <button class="close-x" id="shClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div>
+        <div class="term" id="shOut"></div>
+        <div class="term-row">
+          <span class="term-prompt" id="shPrompt">#</span>
+          <input class="term-input" id="shIn" autocomplete="off" autocorrect="off"
+                 autocapitalize="off" spellcheck="false" placeholder="输入命令后按回车…">
+          <span class="spinner" id="shSpin" style="display:none"></span>
+        </div>
+      </div>
+      <div class="quick" id="shQuick"></div>
+      <div class="hint">
+        基于 KiwiVM <b>Basic Shell</b>:每条命令都是一次独立执行(非 PTY),不支持 <code>top</code>/<code>vim</code> 等交互程序,
+        环境变量与后台任务不会保留;<code>cd</code> 由看板代为记忆。<br>
+        ↑ ↓ 翻历史 · Ctrl+C 中止 · Ctrl+L 清屏 · 长命令受 API 超时限制。<br>
+        需要真终端请用 <b>&gt;_ SSH 终端</b>(在配置里给这台机器填 <code>ssh.user</code> + <code>ssh.password</code> 即会出现该按钮)。
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn sm" id="shClearBtn">清屏</button>
+      <button class="btn sm" id="shCloseBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- SSH terminal modal (real PTY via xterm.js + WebSocket) -->
+<div class="overlay" id="sshOverlay">
+  <div class="modal terminal">
+    <div class="modal-head">
+      <span id="sshStatus"></span>
+      <div>
+        <div class="ttl" id="sshTitle">SSH 终端</div>
+        <div style="font-size:12px;color:var(--text-mute)" id="sshSub"></div>
+      </div>
+      <button class="close-x" id="sshCloseX">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="xterm-host" id="xtermHost"></div>
+      <div class="ssh-bar">
+        <span class="mono" id="sshTarget">—</span>
+        <span class="mono" id="sshHostKey" title="服务器主机密钥指纹"></span>
+        <button class="btn sm" id="sshPin" style="display:none" title="复制 host_key_fingerprint 配置片段">固定指纹</button>
+        <span class="spacer"></span>
+        <span class="ssh-state" id="sshState">未连接</span>
+      </div>
+      <div class="hint">
+        <b>真 PTY</b>:<code>top</code> / <code>vim</code> / tab 补全 / 颜色 / 后台任务 / 环境变量都正常,窗口大小会自动同步;
+        账号密码只存在服务器端,浏览器只传按键与画面。首次连接请核对主机密钥指纹,点「固定指纹」复制配置片段写进
+        <code>instances[].ssh.host_key_fingerprint</code> 即可防中间人。<br>
+        <b>关闭</b>:<code>Shift+Esc</code> / 右下角「关闭」/ 右上角 ×。点击弹窗外不会关闭或断开连接。单独的 <code>Esc</code> 会原样发给远端(vim、htop 要用它)。
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn sm" id="sshClear" title="只清屏幕,不断开连接">清屏</button>
+      <button class="btn sm" id="sshDetach" title="断开 SSH 连接,屏幕内容保留">断开</button>
+      <button class="btn sm" id="sshReconnect" title="重新建立一条 SSH 连接">重连</button>
+      <button class="btn sm primary" id="sshCloseBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 "use strict";
 const $ = (s) => document.querySelector(s);
-const app = { authed: false, authEnabled: false, pollSec: 60, last: null, timer: null, query: "", auto: true };
+const app = { authed: false, authEnabled: false, shellEnabled: false, pollSec: 60, last: null, timer: null, query: "", auto: true };
 
 /* ---------------- formatters ---------------- */
 const fmtBytes = (b) => {
@@ -293,8 +449,9 @@ function toast(msg, kind) {
 async function bootstrap() {
   let st;
   try { st = await api("/api/auth/status"); }
-  catch (e) { st = { enabled: false, authed: true, poll_seconds: 60, title: "VPS看板" }; }
+  catch (e) { st = { enabled: false, authed: true, poll_seconds: 60, shell_enabled: false, title: "VPS看板" }; }
   app.authEnabled = st.enabled;
+  app.shellEnabled = !!st.shell_enabled;
   app.pollSec = st.poll_seconds || 60;
   document.title = st.title || "VPS看板";
   $("#brandTitle").textContent = st.title || "VPS看板";
@@ -457,12 +614,24 @@ function openModal(id) {
     </div>`;
 
   const canControl = i.status !== "error";
+  // Terminal buttons follow the config, not the polled status: a stale "error"
+  // snapshot shouldn't hide them, and a stopped VPS answers with a clear error
+  // inside the terminal itself.
+  const termBtns = [
+    i.ssh_available ? `<button class="btn sm" data-ssh="1" title="真 PTY:top/vim/tab 补全/后台任务都能用">&gt;_ SSH 终端</button>` : "",
+    app.shellEnabled ? `<button class="btn sm" data-shell="1" title="KiwiVM Basic Shell:每条命令一次独立调用">&gt;_ Basic Shell</button>` : "",
+  ].filter(Boolean).join("");
   $("#mFoot").innerHTML = `
+    ${termBtns ? `<span style="margin-right:auto;display:flex;gap:10px;flex-wrap:wrap">${termBtns}</span>` : ""}
     <button class="btn sm" data-act="restart" ${canControl?"":"disabled"}>↻ 重启</button>
     <button class="btn sm" data-act="stop" ${canControl?"":"disabled"}>■ 停止</button>
     <button class="btn primary sm" data-act="start" ${canControl?"":"disabled"}>▶ 启动</button>`;
   $("#mFoot").querySelectorAll("button[data-act]").forEach(b =>
     b.addEventListener("click", () => doAction(i.id, b.dataset.act)));
+  const sshBtn = $("#mFoot").querySelector("button[data-ssh]");
+  if (sshBtn) sshBtn.addEventListener("click", () => openSSH(i.id));
+  const shBtn = $("#mFoot").querySelector("button[data-shell]");
+  if (shBtn) shBtn.addEventListener("click", () => openShell(i.id));
   $("#overlay").classList.add("show");
 }
 
@@ -486,10 +655,381 @@ $("#grid").addEventListener("click", (e) => {
   const card = e.target.closest(".card");
   if (card && card.dataset.id) openModal(card.dataset.id);
 });
-$("#overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeModal(); });
+// Backdrops deliberately do not dismiss dialogs: an accidental outside click
+// must not hide instance details or terminate a live terminal session.
 $("#mClose").addEventListener("click", closeModal);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+document.addEventListener("keydown", (e) => {
+  // Shift+Esc 是终端自己的关窗快捷键,已经在 xterm 里处理掉了;这里必须跳过,
+  // 否则同一个事件冒泡上来会把底下的详情弹窗一起关掉。
+  if (e.key !== "Escape" || e.shiftKey) return;
+  // Overlays stack: SSH terminal (56) → Basic Shell (55) → detail (50).
+  if ($("#sshOverlay").classList.contains("show")) closeSSH();
+  else if ($("#shOverlay").classList.contains("show")) closeShell();
+  else closeModal();
+});
 function closeModal() { $("#overlay").classList.remove("show"); modalInst = null; }
+
+/* ---------------- web shell (KiwiVM Basic Shell) ---------------- */
+// One HTTP request per command: the API keeps no session, so the only state
+// held here is the working directory (re-sent with every command) and history.
+const shell = { id: null, name: null, cwd: "", hist: [], hi: 0, busy: false, ctl: null };
+
+const SHELL_QUICK = [
+  "pwd", "ls -la", "df -h", "free -m", "uptime", "cat /etc/os-release",
+  "top -bn1 | head -15", "ss -tlnp | head -20", "systemctl --failed",
+];
+
+const shPrompt = () => (shell.cwd || "~") + " #";
+
+function shPrint(text, cls) {
+  const out = $("#shOut");
+  const line = document.createElement("div");
+  line.className = "term-line" + (cls ? " " + cls : "");
+  line.textContent = text == null ? "" : String(text);
+  out.appendChild(line);
+  // Bound the scrollback so one chatty command can't grow the DOM forever.
+  while (out.childElementCount > 3000) out.removeChild(out.firstElementChild);
+  out.scrollTop = out.scrollHeight;
+}
+
+function shSetBusy(busy) {
+  shell.busy = busy;
+  $("#shSpin").style.display = busy ? "" : "none";
+  $("#shIn").disabled = busy;
+  if (!busy) $("#shIn").focus();
+}
+
+async function openShell(id) {
+  const i = (app.last && app.last.instances || []).find(x => x.id === id);
+  if (!i) return;
+  shell.id = i.id; shell.name = i.name; shell.cwd = ""; shell.hist = []; shell.hi = 0;
+  $("#shOut").innerHTML = "";
+  $("#shTitle").textContent = i.name + " · Basic Shell";
+  $("#shSub").textContent = [i.hostname, (i.ip_addresses || [])[0], i.os].filter(Boolean).join(" · ");
+  $("#shStatus").innerHTML = statusBadge(i.status);
+  $("#shPrompt").textContent = shPrompt();
+  $("#shIn").value = "";
+  $("#shQuick").innerHTML = SHELL_QUICK.map((c, n) => `<button type="button" data-q="${n}">${esc(c)}</button>`).join("");
+  $("#shQuick").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    $("#shIn").value = SHELL_QUICK[Number(b.dataset.q)];
+    $("#shIn").focus();
+  }));
+  $("#shOverlay").classList.add("show");
+  shPrint("正在连接 " + i.name + " …", "dim");
+  shSetBusy(true);
+  const res = await shellRequest(""); // handshake: resolve the starting directory
+  shSetBusy(false);
+  if (res) {
+    shPrint("已连接 · 当前目录 " + (shell.cwd || "未知"), "dim");
+    shPrint("命令以 root 身份在该 VPS 内执行,请谨慎操作。", "dim");
+  }
+}
+
+// shellRequest posts one command and renders its result. Returns the parsed
+// response, or null when it failed or was aborted (the reason is printed).
+async function shellRequest(command) {
+  shell.ctl = typeof AbortController === "function" ? new AbortController() : null;
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await api(`/api/instances/${encodeURIComponent(shell.id)}/shell`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({command, cwd: shell.cwd}),
+      signal: shell.ctl ? shell.ctl.signal : undefined,
+    });
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      shPrint("^C 已中止(命令可能仍在 VPS 上运行)", "warn");
+    } else if (err && err.status === 401) {
+      shPrint("登录已失效,请重新登录", "err");
+      closeShell();
+      bootstrap();
+    } else {
+      shPrint((err && err.message) || "请求失败", "err");
+    }
+    return null;
+  } finally {
+    shell.ctl = null;
+  }
+  if (command) {
+    if (res.output) shPrint(res.output.replace(/\s+$/, ""), "");
+    if (res.truncated) shPrint("… 输出过长,已截断", "warn");
+    if (res.exit) shPrint("[退出码 " + res.exit + "]", "err");
+    const secs = (Date.now() - t0) / 1000;
+    if (secs >= 3) shPrint("(" + secs.toFixed(1) + " 秒)", "dim");
+  }
+  if (res.cwd) {
+    shell.cwd = res.cwd;
+    $("#shPrompt").textContent = shPrompt();
+  }
+  return res;
+}
+
+async function shellRun(raw) {
+  if (shell.busy) return;
+  const command = (raw || "").trim();
+  if (!command) return;
+  if (command === "clear" || command === "cls") { $("#shOut").innerHTML = ""; return; }
+  shPrint(shPrompt() + " " + command, "cmd");
+  shell.hist.push(command);
+  if (shell.hist.length > 200) shell.hist.shift();
+  shell.hi = shell.hist.length;
+  shSetBusy(true);
+  await shellRequest(command);
+  shSetBusy(false);
+  $("#shIn").value = "";
+}
+
+function closeShell() {
+  if (shell.ctl) { try { shell.ctl.abort(); } catch {} }
+  $("#shOverlay").classList.remove("show");
+  shell.id = null;
+  shell.busy = false;
+  $("#shSpin").style.display = "none";
+  $("#shIn").disabled = false;
+}
+
+$("#shIn").addEventListener("keydown", (e) => {
+  const inp = $("#shIn");
+  if (e.key === "Enter") {
+    e.preventDefault();
+    shellRun(inp.value);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!shell.hist.length) return;
+    shell.hi = Math.max(0, shell.hi - 1);
+    inp.value = shell.hist[shell.hi] || "";
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (!shell.hist.length) return;
+    shell.hi = Math.min(shell.hist.length, shell.hi + 1);
+    inp.value = shell.hist[shell.hi] || "";
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "l") {
+    e.preventDefault();
+    $("#shOut").innerHTML = "";
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+    if (shell.busy && shell.ctl) {
+      e.preventDefault();
+      shPrint("^C", "warn");
+      shell.ctl.abort();
+    } else {
+      shPrint(shPrompt() + " " + inp.value + "^C", "dim");
+      inp.value = "";
+    }
+  }
+});
+$("#shClose").addEventListener("click", closeShell);
+$("#shCloseBtn").addEventListener("click", closeShell);
+$("#shClearBtn").addEventListener("click", () => { $("#shOut").innerHTML = ""; $("#shIn").focus(); });
+
+$("#shOut").addEventListener("click", () => { if (!shell.busy) $("#shIn").focus(); });
+
+/* ---------------- SSH terminal (xterm.js + WebSocket) ---------------- */
+// A real PTY bridged by the server: the browser sends keystrokes and resize
+// events, and receives raw screen bytes. Credentials never reach the client.
+const sshTerm = { inst: null, term: null, fit: null, ws: null };
+const SSH_SUBPROTOCOL = "bw-ssh.v1";
+
+const sshLibLoaded = () => typeof window.Terminal === "function"
+  && window.FitAddon && typeof window.FitAddon.FitAddon === "function";
+
+// Our own status lines need \r\n, otherwise the terminal staircases down.
+const dim = (s) => "\x1b[90m" + s + "\x1b[0m";
+const red = (s) => "\x1b[31m" + s + "\x1b[0m";
+function termWrite(text) {
+  if (sshTerm.term) sshTerm.term.write(String(text).replace(/\n/g, "\r\n"));
+}
+
+function initTerm() {
+  const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+    scrollback: 5000,
+    theme: {
+      background: "#0d1117", foreground: "#d6deeb", cursor: "#7ee787",
+      selectionBackground: "#264f78", black: "#0d1117", brightBlack: "#6e7781",
+    },
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  if (window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon) {
+    term.loadAddon(new WebLinksAddon.WebLinksAddon());
+  }
+  term.open($("#xtermHost"));
+  // Bubble phase, AFTER xterm's own wheel handlers: keep scrollback and remote
+  // mouse/alternate-screen handling intact, but never let an unconsumed wheel
+  // scroll the modal body or dashboard (notably while top/vim is running).
+  $("#xtermHost").addEventListener("wheel", (e) => {
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+  }, {passive: false});
+  term.onData((d) => {
+    const ws = sshTerm.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({t: "in", d}));
+  });
+  term.onResize(({cols, rows}) => sendResize(cols, rows));
+  // 焦点在终端里时,xterm 会把 Esc 当成按键发给远端(vim/htop 需要它),document
+  // 上的 Esc 监听永远收不到 —— 所以关窗用 Shift+Esc,并且在这里就拦掉,不进 PTY。
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.key === "Escape" && e.shiftKey) {
+      if (e.type === "keydown") closeSSH();
+      return false;
+    }
+    return true;
+  });
+  sshTerm.term = term;
+  sshTerm.fit = fit;
+  // 弹窗是 flex 布局,容器尺寸变化(窗口缩放、字体加载完)都要重新算格子,
+  // 否则终端高度和实际可视区不一致,最后一行会被切掉。
+  if (window.ResizeObserver) {
+    let pending = 0;
+    sshTerm.ro = new ResizeObserver(() => {
+      if (pending) return;
+      pending = requestAnimationFrame(() => { pending = 0; sshFit(); });
+    });
+    sshTerm.ro.observe($("#xtermHost"));
+  }
+}
+
+// fit() only works while the overlay is laid out, so it is a no-op when closed.
+function sshFit() {
+  if (!sshTerm.fit || !$("#sshOverlay").classList.contains("show")) return;
+  try { sshTerm.fit.fit(); } catch (e) { /* not laid out yet */ }
+}
+
+function sendResize(cols, rows) {
+  const ws = sshTerm.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN || !cols || !rows) return;
+  ws.send(JSON.stringify({t: "resize", cols, rows}));
+}
+
+function setSSHState(text, kind) {
+  const el = $("#sshState");
+  el.textContent = text;
+  el.className = "ssh-state" + (kind ? " " + kind : "");
+}
+
+function openSSH(id) {
+  const i = (app.last && app.last.instances || []).find(x => x.id === id);
+  if (!i) return;
+  if (!sshLibLoaded()) { toast("终端组件没加载出来,请强制刷新页面(Ctrl+F5)", "bad"); return; }
+  sshTerm.inst = i;
+  $("#sshTitle").textContent = i.name + " · SSH";
+  $("#sshSub").textContent = [i.hostname, (i.ip_addresses || [])[0], i.os].filter(Boolean).join(" · ");
+  $("#sshStatus").innerHTML = statusBadge(i.status);
+  $("#sshTarget").textContent = "—";
+  $("#sshHostKey").textContent = "";
+  $("#sshPin").style.display = "none";
+  $("#sshOverlay").classList.add("show");
+  if (!sshTerm.term) initTerm();
+  sshTerm.term.clear();
+  sshFit();
+  connectSSH();
+  setTimeout(sshFit, 80); // fonts/layout settle after the modal is shown
+}
+
+function connectSSH() {
+  const i = sshTerm.inst;
+  if (!i) return;
+  detachWS();
+  setSSHState("连接中…", "wait");
+  termWrite(dim("正在打开 SSH 终端 …") + "\n");
+  const proto = location.protocol === "https:" ? "wss://" : "ws://";
+  const url = proto + location.host + "/api/instances/" + encodeURIComponent(i.id) + "/ssh";
+  let ws;
+  try { ws = new WebSocket(url, [SSH_SUBPROTOCOL]); }
+  catch (e) { setSSHState("失败", "bad"); termWrite(red("无法创建 WebSocket: " + e) + "\n"); return; }
+  ws.binaryType = "arraybuffer";
+  sshTerm.ws = ws;
+  ws.onopen = () => {
+    setSSHState("已连接", "ok");
+    sshFit();
+    if (sshTerm.term) sshTerm.term.focus();
+  };
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === "string") sshControl(ev.data);
+    else if (sshTerm.term) sshTerm.term.write(new Uint8Array(ev.data));
+  };
+  ws.onerror = () => { /* onclose carries the detail */ };
+  ws.onclose = (ev) => {
+    if (sshTerm.ws === ws) sshTerm.ws = null;
+    setSSHState("已断开", "bad");
+    termWrite(dim("[连接关闭 code=" + ev.code + (ev.reason ? " " + ev.reason : "") + "]") + "\n");
+  };
+}
+
+function sshControl(text) {
+  let m;
+  try { m = JSON.parse(text); } catch (e) { return; }
+  if (m.t === "status") { termWrite(dim(m.msg || "") + "\n"); return; }
+  if (m.t === "ready") {
+    $("#sshTarget").textContent = (m.user || "") + "@" + (m.host || "");
+    $("#sshHostKey").textContent = m.host_key || "";
+    $("#sshHostKey").title = m.pinned ? "主机密钥指纹已按配置校验" : "未固定:核对后可写入 ssh.host_key_fingerprint";
+    // Offer to pin the key only while it is unpinned: that's the TOFU step.
+    const pinBtn = $("#sshPin");
+    pinBtn.dataset.fp = m.host_key || "";
+    pinBtn.style.display = (m.host_key && !m.pinned) ? "" : "none";
+    termWrite(dim("已连接 " + m.user + "@" + m.host + " · 主机密钥 " + (m.host_key || "未知")
+      + (m.pinned ? "(已固定)" : "(未固定,请核对)")) + "\n");
+    setSSHState("已连接", "ok");
+    if (sshTerm.term) sendResize(sshTerm.term.cols, sshTerm.term.rows);
+    return;
+  }
+  if (m.t === "err") { setSSHState("错误", "bad"); termWrite(red(m.msg || "连接失败") + "\n"); return; }
+  if (m.t === "exit") {
+    termWrite(dim("[远端 shell 已退出" + (m.code == null ? "" : ",code=" + m.code) + "]") + "\n");
+    return;
+  }
+}
+
+// detachWS closes the socket without printing the "连接关闭" line: used before a
+// reconnect and when the user closes the window on purpose.
+function detachWS() {
+  const ws = sshTerm.ws;
+  sshTerm.ws = null;
+  if (!ws) return;
+  ws.onclose = null; ws.onmessage = null; ws.onerror = null;
+  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+    try { ws.close(1000, "client closed"); } catch (e) {}
+  }
+}
+
+function closeSSH() {
+  detachWS();
+  $("#sshOverlay").classList.remove("show");
+  sshTerm.inst = null;
+  setSSHState("未连接");
+}
+
+$("#sshCloseX").addEventListener("click", closeSSH);
+$("#sshCloseBtn").addEventListener("click", closeSSH);
+$("#sshReconnect").addEventListener("click", () => { if (sshTerm.inst) connectSSH(); });
+$("#sshDetach").addEventListener("click", () => { detachWS(); setSSHState("已断开", "bad"); });
+$("#sshClear").addEventListener("click", () => {
+  if (sshTerm.term) sshTerm.term.clear();
+  if (sshTerm.term) sshTerm.term.focus(); // 焦点还给终端,接着打字
+});
+// Trust-on-first-use helper: copy the config line that pins this host key.
+$("#sshPin").addEventListener("click", async () => {
+  const fp = $("#sshPin").dataset.fp;
+  if (!fp) return;
+  const snippet = '"host_key_fingerprint": "' + fp + '"';
+  let copied = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(snippet);
+      copied = true;
+    }
+  } catch (e) { copied = false; }
+  if (copied) toast("已复制,粘到该实例的 ssh 块里重启即可固定", "ok");
+  else prompt("复制到 config.json 里该实例的 ssh 块:", snippet); // 非安全上下文下 clipboard 不可用
+});
+
+window.addEventListener("resize", sshFit);
 
 /* ---------------- polling ---------------- */
 // Adaptive: while the store is still on its first pass (snapshot.updated_at

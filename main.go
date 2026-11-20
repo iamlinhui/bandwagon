@@ -35,7 +35,13 @@ func main() {
 	// Background polling runs for the lifetime of the process.
 	go store.Run(ctx)
 
-	srv := dashboard.NewServer(store, cfg.Password)
+	// The web shell runs commands as root inside every configured VPS, so warn
+	// loudly when it is exposed without the dashboard password.
+	if cfg.Shell.Enabled && cfg.Password == "" {
+		log.Print("WARNING: shell.enabled=true without a password — anyone who can reach this port gets a root shell on every VPS")
+	}
+
+	srv := dashboard.NewServer(store, cfg)
 	if err := srv.ListenAndServe(ctx, cfg.Listen); err != nil {
 		log.Fatalf("server: %v", err)
 	}

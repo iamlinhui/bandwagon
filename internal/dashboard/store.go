@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type Instance struct {
 	Location     string    `json:"location"`
 	Plan         string    `json:"plan"`
 	SSHPort      int       `json:"ssh_port"`
+	SSHAvailable bool      `json:"ssh_available"`
 	RAMTotal     int64     `json:"ram_total"`
 	RAMUsed      int64     `json:"ram_used"`
 	DiskTotal    int64     `json:"disk_total"`
@@ -73,11 +75,12 @@ func NewStore(cfg []InstanceConfig, pollSec int, title string) *Store {
 	}
 	for _, ic := range cfg {
 		inst := &Instance{
-			ID:     ic.ID,
-			Name:   ic.Name,
-			Group:  ic.Group,
-			VEID:   ic.VEID,
-			Status: "pending",
+			ID:           ic.ID,
+			Name:         ic.Name,
+			Group:        ic.Group,
+			VEID:         ic.VEID,
+			Status:       "pending",
+			SSHAvailable: ic.SSH.Present(),
 		}
 		s.byID[ic.ID] = inst
 		s.order = append(s.order, ic.ID)
@@ -119,10 +122,11 @@ func (s *Store) pollOnce() {
 // refreshOne fetches service + live data for a single VPS and stores a snapshot.
 func (s *Store) refreshOne(cfg InstanceConfig) {
 	inst := &Instance{
-		ID:    cfg.ID,
-		Name:  cfg.Name,
-		Group: cfg.Group,
-		VEID:  cfg.VEID,
+		ID:           cfg.ID,
+		Name:         cfg.Name,
+		Group:        cfg.Group,
+		VEID:         cfg.VEID,
+		SSHAvailable: cfg.SSH.Present(),
 	}
 
 	svc, err := s.client.GetServiceInfo(cfg.VEID, cfg.APIKey)
@@ -209,4 +213,43 @@ func (s *Store) configFor(id string) (InstanceConfig, bool) {
 		return cfg, ok
 	}
 	return InstanceConfig{}, false
+}
+
+// sshEndpoint resolves where the web terminal should connect. Explicit config
+// wins; otherwise fall back to what KiwiVM reported — the first IPv4 address and
+// the per-VM ssh_port from getLiveServiceInfo (BandwagonHost assigns non-standard
+// SSH ports, so this saves writing them down by hand).
+//
+// ok is false when the instance has no SSH credentials configured, or when no
+// usable address is known yet (first poll still running / machine offline).
+func (s *Store) sshEndpoint(id string) (host string, port int, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	inst, found := s.byID[id]
+	if !found {
+		return "", 0, false
+	}
+	cfg, hasCfg := s.cfgByVEID[inst.VEID]
+	if !hasCfg || !cfg.SSH.Present() {
+		return "", 0, false
+	}
+	host = strings.TrimSpace(cfg.SSH.Host)
+	if host == "" {
+		for _, ip := range inst.IPAddresses {
+			// KiwiVM lists IPv4 addresses alongside IPv6 /64 subnets; a subnet is
+			// not something you can dial, so take the first IPv4.
+			if !strings.Contains(ip, ":") {
+				host = ip
+				break
+			}
+		}
+	}
+	port = cfg.SSH.Port
+	if port <= 0 {
+		port = inst.SSHPort
+	}
+	if port <= 0 {
+		port = 22
+	}
+	return host, port, host != ""
 }
