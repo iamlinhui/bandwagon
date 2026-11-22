@@ -658,15 +658,9 @@ $("#grid").addEventListener("click", (e) => {
 // Backdrops deliberately do not dismiss dialogs: an accidental outside click
 // must not hide instance details or terminate a live terminal session.
 $("#mClose").addEventListener("click", closeModal);
-document.addEventListener("keydown", (e) => {
-  // Shift+Esc 是终端自己的关窗快捷键,已经在 xterm 里处理掉了;这里必须跳过,
-  // 否则同一个事件冒泡上来会把底下的详情弹窗一起关掉。
-  if (e.key !== "Escape" || e.shiftKey) return;
-  // Overlays stack: SSH terminal (56) → Basic Shell (55) → detail (50).
-  if ($("#sshOverlay").classList.contains("show")) closeSSH();
-  else if ($("#shOverlay").classList.contains("show")) closeShell();
-  else closeModal();
-});
+// No global Escape-to-dismiss handler: Esc belongs to the focused control or
+// remote terminal, and must never close a dialog or disconnect SSH. Explicit
+// close buttons remain available; SSH also supports its deliberate Shift+Esc.
 function closeModal() { $("#overlay").classList.remove("show"); modalInst = null; }
 
 /* ---------------- web shell (KiwiVM Basic Shell) ---------------- */
@@ -871,8 +865,8 @@ function initTerm() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({t: "in", d}));
   });
   term.onResize(({cols, rows}) => sendResize(cols, rows));
-  // 焦点在终端里时,xterm 会把 Esc 当成按键发给远端(vim/htop 需要它),document
-  // 上的 Esc 监听永远收不到 —— 所以关窗用 Shift+Esc,并且在这里就拦掉,不进 PTY。
+  // 普通 Esc 原样交给远端(vim/htop 需要它),不关闭任何弹窗。
+  // 只有显式的 Shift+Esc 才关 SSH 弹窗,并拦掉该组合键,不发进 PTY。
   term.attachCustomKeyEventHandler((e) => {
     if (e.key === "Escape" && e.shiftKey) {
       if (e.type === "keydown") closeSSH();
