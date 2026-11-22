@@ -340,12 +340,6 @@
         </div>
       </div>
       <div class="quick" id="shQuick"></div>
-      <div class="hint">
-        基于 KiwiVM <b>Basic Shell</b>:每条命令都是一次独立执行(非 PTY),不支持 <code>top</code>/<code>vim</code> 等交互程序,
-        环境变量与后台任务不会保留;<code>cd</code> 由看板代为记忆。<br>
-        ↑ ↓ 翻历史 · Ctrl+C 中止 · Ctrl+L 清屏 · 长命令受 API 超时限制。<br>
-        需要真终端请用 <b>&gt;_ SSH 终端</b>(在配置里给这台机器填 <code>ssh.user</code> + <code>ssh.password</code> 即会出现该按钮)。
-      </div>
     </div>
     <div class="modal-foot">
       <button class="btn sm" id="shClearBtn">清屏</button>
@@ -373,12 +367,6 @@
         <button class="btn sm" id="sshPin" style="display:none" title="复制 host_key_fingerprint 配置片段">固定指纹</button>
         <span class="spacer"></span>
         <span class="ssh-state" id="sshState">未连接</span>
-      </div>
-      <div class="hint">
-        <b>真 PTY</b>:<code>top</code> / <code>vim</code> / tab 补全 / 颜色 / 后台任务 / 环境变量都正常,窗口大小会自动同步;
-        账号密码只存在服务器端,浏览器只传按键与画面。首次连接请核对主机密钥指纹,点「固定指纹」复制配置片段写进
-        <code>instances[].ssh.host_key_fingerprint</code> 即可防中间人。<br>
-        <b>关闭</b>:<code>Shift+Esc</code> / 右下角「关闭」/ 右上角 ×。点击弹窗外不会关闭或断开连接。单独的 <code>Esc</code> 会原样发给远端(vim、htop 要用它)。
       </div>
     </div>
     <div class="modal-foot">
